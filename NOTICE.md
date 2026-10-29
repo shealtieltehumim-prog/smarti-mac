@@ -5,6 +5,8 @@
 This macOS port is a derivative work, distributed with the permission of the original author on the condition stated by him:
 "בכפוף לתנאי הרישיון ועם קרדיט הוגן" (subject to the license terms and with fair credit).
 
+macOS port by **Shaltiel**. The original authorship and copyright remain with Elazar (א.מ.ד).
+
 ## License
 
 The software is licensed under the **PolyForm Noncommercial License 1.0.0** (see `LICENSE`).

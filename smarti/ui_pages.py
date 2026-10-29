@@ -6422,6 +6422,11 @@ class AboutPage(QWidget):
         credit_layout.addWidget(credit_ornament)
         credit_layout.addWidget(credit_title)
         credit_layout.addWidget(credit_note)
+        port_credit = QLabel(MAC_PORT_CREDIT)
+        port_credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        port_credit.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        port_credit.setStyleSheet(f"color: {SUBTLE_TEXT_COLOR}; font-size: 11px; letter-spacing: 1px;")
+        credit_layout.addWidget(port_credit)
         content_layout.addWidget(credit_card)
 
         overview = QLabel(
