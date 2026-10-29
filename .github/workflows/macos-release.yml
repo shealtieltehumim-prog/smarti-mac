@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install system libraries
-        run: brew install portaudio
+        run: brew install portaudio uv
       - name: Build app and DMG
         run: scripts/build_macos.sh
       - uses: actions/upload-artifact@v4

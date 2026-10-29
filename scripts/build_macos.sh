@@ -23,9 +23,12 @@ fi
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "Installing uv..."
-  python3 -m pip install --user uv
-  USER_BASE="$(python3 -m site --user-base)"
-  export PATH="$USER_BASE/bin:$HOME/.local/bin:$PATH"
+  if command -v brew >/dev/null 2>&1; then
+    brew install uv
+  else
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  fi
 fi
 command -v uv >/dev/null 2>&1 || { echo "uv not found; install it with: brew install uv" >&2; exit 1; }
 
