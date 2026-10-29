@@ -2,6 +2,10 @@ name: macOS build
 
 on:
   workflow_dispatch:
+    inputs:
+      runners:
+        description: 'JSON list of runners (macos-15 = Apple Silicon, macos-15-intel = Intel)'
+        default: '["macos-15", "macos-15-intel"]'
   push:
     tags: ["v*"]
 
@@ -10,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, macos-15-intel]   # Apple Silicon and Intel
+        os: ${{ fromJSON(github.event.inputs.runners || '["macos-15", "macos-15-intel"]') }}   # Apple Silicon and Intel
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
