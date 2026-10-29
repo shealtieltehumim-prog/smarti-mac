@@ -1,0 +1,482 @@
+// SmartiAI - macOS desktop automation (JavaScript for Automation / System Events).
+//
+// Counterpart of the Windows UI Automation helper. Invoked as:
+//   osascript -l JavaScript mac_automation.jxa '<json args>'
+// and prints one JSON document. Requires the "Accessibility" permission for the
+// app that launches osascript (System Settings -> Privacy & Security).
+//
+// Element paths look like  "Safari|0|3|1"  = process | window index | child index ...
+
+ObjC.import('stdlib');
+const SE = Application('System Events');
+const APP = Application.currentApplication();
+APP.includeStandardAdditions = true;
+
+const DESTRUCTIVE_TERMS = [
+  'delete', 'remove', 'uninstall', 'format', 'reset', 'discard', 'trash', 'erase',
+  'wipe', 'empty trash', 'מחק', 'מחיקה', 'הסר', 'הסרה', 'איפוס', 'פרמוט'
+];
+
+const KEY_CODES = {
+  'return': 36, 'enter': 76, 'tab': 48, 'space': 49, 'delete': 51, 'backspace': 51,
+  'escape': 53, 'esc': 53, 'left': 123, 'right': 124, 'down': 125, 'up': 126,
+  'home': 115, 'end': 119, 'pageup': 116, 'pagedown': 121, 'forwarddelete': 117, 'del': 117,
+  'f1': 122, 'f2': 120, 'f3': 99, 'f4': 118, 'f5': 96, 'f6': 97, 'f7': 98, 'f8': 100,
+  'f9': 101, 'f10': 109, 'f11': 103, 'f12': 111
+};
+
+const MODIFIERS = {
+  'command': 'command down', 'cmd': 'command down', 'win': 'command down', 'windows': 'command down',
+  'meta': 'command down', 'super': 'command down',
+  'ctrl': 'control down', 'control': 'control down',
+  'alt': 'option down', 'option': 'option down', 'opt': 'option down',
+  'shift': 'shift down'
+};
+
+const ROLE_ALIASES = {
+  'button': ['axbutton'], 'edit': ['axtextfield', 'axtextarea', 'axcombobox'],
+  'textfield': ['axtextfield'], 'textarea': ['axtextarea'], 'text': ['axstatictext'],
+  'checkbox': ['axcheckbox'], 'radiobutton': ['axradiobutton'], 'combobox': ['axcombobox', 'axpopupbutton'],
+  'menuitem': ['axmenuitem'], 'menu': ['axmenu', 'axmenubar'], 'list': ['axlist', 'axoutline', 'axtable'],
+  'listitem': ['axrow', 'axcell'], 'tab': ['axtabgroup', 'axradiobutton'], 'window': ['axwindow'],
+  'link': ['axlink'], 'image': ['siximage', 'aximage'], 'slider': ['axslider'], 'group': ['axgroup']
+};
+
+function safe(fn, fallback) {
+  try {
+    const value = fn();
+    return (value === undefined || value === null) ? fallback : value;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function norm(value) {
+  return String(value === undefined || value === null ? '' : value).trim().toLowerCase();
+}
+
+function fail(message, extra) {
+  const payload = { status: 'error', message: String(message) };
+  if (extra) { Object.keys(extra).forEach(k => { payload[k] = extra[k]; }); }
+  return payload;
+}
+
+function ok(action, message, extra) {
+  const payload = { status: 'ok', action: action, message: message };
+  if (extra) { Object.keys(extra).forEach(k => { payload[k] = extra[k]; }); }
+  return payload;
+}
+
+function rectOf(el) {
+  const p = safe(() => el.position(), null);
+  const s = safe(() => el.size(), null);
+  if (!p || !s) { return {}; }
+  return { left: p[0], top: p[1], right: p[0] + s[0], bottom: p[1] + s[1], width: s[0], height: s[1] };
+}
+
+function describe(el, path, depth) {
+  const title = safe(() => el.title(), '');
+  const description = safe(() => el.description(), '');
+  const name = title || safe(() => el.name(), '') || description;
+  let value = safe(() => el.value(), '');
+  if (value !== '' && typeof value === 'object') { value = ''; }
+  return {
+    path: path,
+    depth: depth,
+    name: String(name || ''),
+    control_type: String(safe(() => el.role(), '')),
+    class_name: String(safe(() => el.subrole(), '')),
+    automation_id: String(safe(() => el.attributes.byName('AXIdentifier').value(), '')),
+    value: String(value).slice(0, 200),
+    is_enabled: Boolean(safe(() => el.enabled(), true)),
+    is_offscreen: false,
+    rect: rectOf(el),
+    patterns: safe(() => el.actions().map(a => a.name()), [])
+  };
+}
+
+function visibleProcesses() {
+  return safe(() => SE.applicationProcesses.whose({ backgroundOnly: false })(), []);
+}
+
+function windowsOf(proc) {
+  return safe(() => proc.windows(), []);
+}
+
+function findWindow(query) {
+  const q = norm(query);
+  if (!q) { return null; }
+  const procs = visibleProcesses();
+  for (let pi = 0; pi < procs.length; pi++) {
+    const proc = procs[pi];
+    const procName = String(safe(() => proc.name(), ''));
+    const wins = windowsOf(proc);
+    for (let wi = 0; wi < wins.length; wi++) {
+      const title = String(safe(() => wins[wi].name(), ''));
+      if (norm(title).indexOf(q) !== -1) {
+        return { proc: proc, procName: procName, win: wins[wi], winIndex: wi, path: procName + '|' + wi };
+      }
+    }
+    if (norm(procName).indexOf(q) !== -1 && wins.length) {
+      return { proc: proc, procName: procName, win: wins[0], winIndex: 0, path: procName + '|0' };
+    }
+  }
+  return null;
+}
+
+function resolvePath(path) {
+  const parts = String(path).split('|');
+  const procName = parts[0];
+  const winIndex = parseInt(parts[1] || '0', 10);
+  const proc = SE.applicationProcesses.byName(procName);
+  const wins = proc.windows();
+  if (!wins || winIndex >= wins.length) { throw new Error('window path not found: ' + path); }
+  let el = wins[winIndex];
+  for (let i = 2; i < parts.length; i++) {
+    const kids = el.uiElements();
+    const idx = parseInt(parts[i], 10);
+    if (!kids || idx >= kids.length) { throw new Error('element path not found: ' + path); }
+    el = kids[idx];
+  }
+  return { el: el, proc: proc, procName: procName, path: String(path) };
+}
+
+function walk(rootEl, rootPath, maxDepth, limit) {
+  const items = [];
+  const queue = [[rootEl, rootPath, 0]];
+  while (queue.length && items.length < limit) {
+    const entry = queue.shift();
+    const el = entry[0], path = entry[1], depth = entry[2];
+    items.push(describe(el, path, depth));
+    if (depth >= maxDepth) { continue; }
+    const kids = safe(() => el.uiElements(), []);
+    for (let i = 0; i < kids.length; i++) { queue.push([kids[i], path + '|' + i, depth + 1]); }
+  }
+  return items;
+}
+
+function typeMatches(actual, expected) {
+  const want = norm(expected).replace(/control$/, '');
+  if (!want) { return true; }
+  const have = norm(actual);
+  if (have === want || have === 'ax' + want) { return true; }
+  const aliases = ROLE_ALIASES[want] || [];
+  return aliases.indexOf(have) !== -1;
+}
+
+function itemMatches(item, criteria) {
+  const name = norm(criteria.name || criteria.text);
+  const automationId = norm(criteria.automation_id);
+  const className = norm(criteria.class_name);
+  const controlType = norm(criteria.control_type);
+  if (name && (norm(item.name) + ' ' + norm(item.value)).indexOf(name) === -1) { return false; }
+  if (automationId && automationId !== norm(item.automation_id)) { return false; }
+  if (className && norm(item.class_name).indexOf(className) === -1) { return false; }
+  if (controlType && !typeMatches(item.control_type, controlType)) { return false; }
+  return true;
+}
+
+function hasCriteria(args) {
+  return ['name', 'text', 'automation_id', 'class_name', 'control_type'].some(k => String(args[k] || '').trim());
+}
+
+function quickItem(el, path) {
+  // Cheap attribute read (few Apple Events) used only to decide whether an element matches.
+  const title = safe(() => el.title(), '');
+  const name = title || safe(() => el.name(), '') || safe(() => el.description(), '');
+  let value = safe(() => el.value(), '');
+  if (value !== '' && typeof value === 'object') { value = ''; }
+  return {
+    path: path,
+    name: String(name || ''),
+    control_type: String(safe(() => el.role(), '')),
+    class_name: String(safe(() => el.subrole(), '')),
+    automation_id: String(safe(() => el.attributes.byName('AXIdentifier').value(), '')),
+    value: String(value)
+  };
+}
+
+function walkMatch(rootEl, rootPath, maxDepth, limit, criteria, deadline) {
+  const hits = [];
+  const queue = [[rootEl, rootPath, 0]];
+  while (queue.length && hits.length < limit && Date.now() < deadline) {
+    const entry = queue.shift();
+    const el = entry[0], path = entry[1], depth = entry[2];
+    if (itemMatches(quickItem(el, path), criteria)) { hits.push(path); }
+    if (depth >= maxDepth) { continue; }
+    const kids = safe(() => el.uiElements(), []);
+    for (let i = 0; i < kids.length; i++) { queue.push([kids[i], path + '|' + i, depth + 1]); }
+  }
+  return hits;
+}
+
+function searchTargets(args, requireMatch) {
+  const limit = parseInt(args.limit || 40, 10);
+  const maxDepth = parseInt(args.max_depth || 5, 10);
+  if (args.path) {
+    const target = resolvePath(args.path);
+    return [target];
+  }
+  let rootInfo = null;
+  if (String(args.window || '').trim()) {
+    rootInfo = findWindow(args.window);
+    if (!rootInfo) { throw new Error('window not found: ' + args.window); }
+  }
+  if (!hasCriteria(args)) {
+    if (requireMatch && rootInfo) {
+      return [{ el: rootInfo.win, proc: rootInfo.proc, procName: rootInfo.procName, path: rootInfo.path }];
+    }
+    if (requireMatch) { throw new Error('missing target: provide path, window, name, automation_id, class_name, or control_type'); }
+    return [];
+  }
+  const roots = [];
+  if (rootInfo) {
+    roots.push({ el: rootInfo.win, path: rootInfo.path });
+  } else {
+    const front = safe(() => SE.applicationProcesses.whose({ frontmost: true })(), []);
+    front.forEach(proc => {
+      const procName = String(safe(() => proc.name(), ''));
+      windowsOf(proc).forEach((w, wi) => roots.push({ el: w, path: procName + '|' + wi }));
+    });
+  }
+  const matches = [];
+  const deadline = Date.now() + 20000;
+  for (let r = 0; r < roots.length && matches.length < limit; r++) {
+    const paths = walkMatch(roots[r].el, roots[r].path, maxDepth, limit - matches.length, args, deadline);
+    for (let i = 0; i < paths.length; i++) {
+      const resolved = resolvePath(paths[i]);
+      matches.push(Object.assign({ _item: describe(resolved.el, paths[i], 0) }, resolved));
+    }
+  }
+  if (requireMatch && !matches.length) { throw new Error('target element not found'); }
+  return matches;
+}
+
+function targetInfo(target) {
+  return describe(target.el, target.path, 0);
+}
+
+function looksDestructive(info) {
+  const label = norm(info.name + ' ' + info.automation_id + ' ' + info.class_name);
+  return DESTRUCTIVE_TERMS.some(term => label.indexOf(term) !== -1);
+}
+
+function pasteText(text) {
+  let previous = null;
+  previous = safe(() => APP.theClipboard(), null);
+  APP.setTheClipboardTo(String(text));
+  APP.delay(0.1);
+  SE.keystroke('v', { using: 'command down' });
+  APP.delay(0.15);
+  if (typeof previous === 'string') { safe(() => APP.setTheClipboardTo(previous), null); }
+}
+
+function typeText(text) {
+  const value = String(text);
+  if (/^[\x20-\x7E]*$/.test(value) && value.length <= 200) {
+    SE.keystroke(value);
+  } else {
+    pasteText(value);
+  }
+}
+
+function sendChord(keys) {
+  const mods = [];
+  let main = null;
+  keys.forEach(k => {
+    const n = norm(k);
+    if (MODIFIERS[n]) { mods.push(MODIFIERS[n]); } else { main = n; }
+  });
+  if (main === null) { throw new Error('no main key provided'); }
+  const opts = mods.length ? { using: mods } : {};
+  if (KEY_CODES[main] !== undefined) {
+    SE.keyCode(KEY_CODES[main], opts);
+  } else {
+    SE.keystroke(main, opts);
+  }
+}
+
+function keysList(args) {
+  let keys = args.keys;
+  if (!Array.isArray(keys)) {
+    keys = String(keys || args.text || '').replace(/\+/g, ',').split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return keys.map(String);
+}
+
+function focusForKeys(args) {
+  const targeted = ['path', 'window', 'name', 'automation_id', 'class_name', 'control_type'].some(k => String(args[k] || '').trim());
+  if (targeted) {
+    const target = searchTargets(args, true)[0];
+    activate(target);
+    safe(() => { target.el.focused = true; return true; }, null);
+    APP.delay(0.15);
+    return targetInfo(target);
+  }
+  if (!args.allow_global_keys) {
+    throw new Error('keyboard actions require a target/window or allow_global_keys=true');
+  }
+  return {};
+}
+
+function activate(target) {
+  safe(() => { target.proc.frontmost = true; return true; }, null);
+  safe(() => target.el.actions.byName('AXRaise').perform(), null);
+}
+
+function actionKeyboard(action, args) {
+  const target = focusForKeys(args);
+  if (args.dry_run) { return ok(action, 'dry run: keyboard target resolved, no keys sent', { target: target }); }
+  if (action === 'send_keys') {
+    if (Array.isArray(args.keys)) {
+      sendChord(args.keys.map(String));
+    } else {
+      typeText(args.keys !== undefined && args.keys !== '' ? args.keys : (args.text || ''));
+    }
+    return ok(action, 'keys sent', { target: target });
+  }
+  if (action === 'press') {
+    const key = String(args.keys || args.text || '');
+    if (!key) { return fail('press requires keys or text'); }
+    sendChord([key]);
+    return ok(action, 'key pressed', { target: target });
+  }
+  const keys = keysList(args);
+  if (!keys.length) { return fail('hotkey requires keys as a list or plus/comma separated string'); }
+  sendChord(keys);
+  return ok(action, 'hotkey sent', { target: target });
+}
+
+function actionOnTarget(action, args) {
+  const target = searchTargets(args, true)[0];
+  const before = targetInfo(target);
+  if (args.dry_run) { return ok(action, 'dry run: target resolved, no action performed', { target: before }); }
+  if (['invoke', 'click', 'toggle', 'select', 'expand', 'collapse'].indexOf(action) !== -1
+      && looksDestructive(before) && !args.allow_destructive) {
+    return fail('target looks destructive; rerun with dry_run first and set allow_destructive=true only after user approval', { target: before });
+  }
+  if (action === 'focus') {
+    activate(target);
+    target.el.focused = true;
+    return ok(action, 'target focused', { target: before });
+  }
+  if (action === 'invoke' || action === 'click' || action === 'toggle' || action === 'expand' || action === 'collapse') {
+    activate(target);
+    const pressed = safe(() => { target.el.actions.byName('AXPress').perform(); return true; }, false);
+    if (!pressed) {
+      if (action === 'invoke' && !args.allow_mouse_fallback) {
+        return fail('target does not expose AXPress; set allow_mouse_fallback=true only when a bounded element click is acceptable', { target: before });
+      }
+      target.el.click();
+    }
+    const done = { click: 'clicked', invoke: 'invoked', toggle: 'toggled', expand: 'expanded', collapse: 'collapsed' };
+    return ok(action, 'target ' + (done[action] || action), { target: before });
+  }
+  if (action === 'select') {
+    activate(target);
+    const selected = safe(() => { target.el.selected = true; return true; }, false);
+    if (!selected) { target.el.click(); }
+    return ok(action, 'target selected', { target: before });
+  }
+  if (action === 'set_text') {
+    const text = String(args.text === undefined || args.text === null ? '' : args.text);
+    activate(target);
+    safe(() => { target.el.focused = true; return true; }, null);
+    const written = safe(() => { target.el.value = text; return true; }, false);
+    if (written) { return ok(action, 'text set with AXValue', { target: before }); }
+    if (args.allow_clipboard_fallback !== false) {
+      safe(() => { target.el.click(); return true; }, null);
+      SE.keystroke('a', { using: 'command down' });
+      pasteText(text);
+      return ok(action, 'text pasted after focusing target', { target: before });
+    }
+    return fail('target does not expose a writable AXValue and clipboard fallback is disabled', { target: before });
+  }
+  return fail('unsupported target action: ' + action);
+}
+
+function run(argv) {
+  let args = {};
+  try { args = JSON.parse(argv && argv[0] ? argv[0] : '{}'); } catch (e) { return JSON.stringify(fail('invalid arguments')); }
+  const action = norm(args.action || 'inspect');
+  let result;
+  try {
+    // Unwrapped probe: surfaces missing Automation / Accessibility permission instead of silently returning empty lists.
+    const front = SE.applicationProcesses.whose({ frontmost: true })();
+    if (front.length) { front[0].windows(); }
+    if (action === 'inspect') {
+      let rootEl = null, rootPath = '';
+      if (args.window) {
+        const info = findWindow(args.window);
+        if (!info) { return JSON.stringify(fail('window not found: ' + args.window)); }
+        rootEl = info.win; rootPath = info.path;
+        const elements = walk(rootEl, rootPath, parseInt(args.max_depth === undefined ? 2 : args.max_depth, 10), parseInt(args.limit || 120, 10));
+        result = ok('inspect', 'accessibility tree collected', { root: describe(rootEl, rootPath, 0), elements: elements });
+      } else {
+        // No window given: inspect the frontmost application's windows.
+        const front = safe(() => SE.applicationProcesses.whose({ frontmost: true })(), []);
+        const elements = [];
+        const limit = parseInt(args.limit || 120, 10);
+        front.forEach(proc => {
+          const procName = String(safe(() => proc.name(), ''));
+          windowsOf(proc).forEach((w, wi) => {
+            if (elements.length < limit) {
+              walk(w, procName + '|' + wi, parseInt(args.max_depth === undefined ? 2 : args.max_depth, 10), limit - elements.length)
+                .forEach(item => elements.push(item));
+            }
+          });
+        });
+        result = ok('inspect', 'accessibility tree collected (frontmost application)', { elements: elements });
+      }
+    } else if (action === 'list_windows' || action === 'list') {
+      const windows = [];
+      const limit = parseInt(args.limit || 80, 10);
+      visibleProcesses().forEach(proc => {
+        const procName = String(safe(() => proc.name(), ''));
+        windowsOf(proc).forEach((w, wi) => {
+          if (windows.length < limit) {
+            const info = describe(w, procName + '|' + wi, 1);
+            info.process = procName;
+            windows.push(info);
+          }
+        });
+      });
+      result = ok('list_windows', 'windows collected', { windows: windows });
+    } else if (action === 'find') {
+      const matches = searchTargets(args, false);
+      result = ok('find', 'matches collected', { count: matches.length, elements: matches.map(m => m._item || targetInfo(m)) });
+    } else if (action === 'get_focused') {
+      const front = safe(() => SE.applicationProcesses.whose({ frontmost: true })(), []);
+      const proc = front.length ? front[0] : null;
+      const info = { process: proc ? String(safe(() => proc.name(), '')) : '', window: '' };
+      if (proc) { const w = windowsOf(proc); if (w.length) { info.window = String(safe(() => w[0].name(), '')); } }
+      result = ok('get_focused', 'focused application collected', { focused: info });
+    } else if (action === 'focus_window' || action === 'activate_window') {
+      const query = String(args.window || args.name || args.text || '').trim();
+      if (!query) { return JSON.stringify(fail('focus_window requires window or name')); }
+      const info = findWindow(query);
+      if (!info) { return JSON.stringify(fail('window not found: ' + query)); }
+      activate({ proc: info.proc, el: info.win });
+      result = ok('focus_window', 'window focused', { target: describe(info.win, info.path, 0) });
+    } else if (['focus', 'invoke', 'click', 'set_text', 'toggle', 'select', 'expand', 'collapse'].indexOf(action) !== -1) {
+      if (action === 'click' && args.x !== undefined && args.y !== undefined && !hasCriteria(args) && !args.path && !args.window) {
+        SE.click({ at: [parseInt(args.x, 10), parseInt(args.y, 10)] });
+        result = ok('click', 'click sent at coordinates', { x: args.x, y: args.y });
+      } else {
+        result = actionOnTarget(action, args);
+      }
+    } else if (['send_keys', 'press', 'hotkey'].indexOf(action) !== -1) {
+      result = actionKeyboard(action, args);
+    } else if (['type', 'type_text', 'write', 'write_text'].indexOf(action) !== -1) {
+      args.allow_global_keys = true;
+      args.action = 'send_keys';
+      args.keys = String(args.text || '');
+      result = actionKeyboard('send_keys', args);
+    } else {
+      result = fail('unknown action: ' + action);
+    }
+  } catch (e) {
+    result = fail(String(e && e.message ? e.message : e));
+  }
+  return JSON.stringify(result);
+}
