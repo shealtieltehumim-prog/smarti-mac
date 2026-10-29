@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-14, macos-15-intel]   # Apple Silicon and Intel
     runs-on: ${{ matrix.os }}
