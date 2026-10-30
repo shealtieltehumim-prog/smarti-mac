@@ -701,7 +701,7 @@ SKILL_LOG_FILE = os.path.join(USER_DATA_DIR, "smarti_skills.log")
 AUDIT_LOG_FILE = os.path.join(USER_DATA_DIR, "smarti_audit.log")
 SETTINGS_SCHEMA_VERSION = 2
 APP_VERSION = "V0.87.0"
-MAC_PORT_CREDIT = "macOS port by Shaltiel"
+# macOS port: Shaltiel (source-code credit only; intentionally not shown in the UI)
 LEGAL_AGREEMENT_VERSION = "privacy-disclaimer-2026-06-02-v1"
 LEGAL_AGREEMENT_EFFECTIVE_DATE = "2026-06-02"
 LEGAL_AGREEMENT_TITLE = "מדיניות פרטיות, תנאי שימוש וכתב ויתור - Smarti AI"

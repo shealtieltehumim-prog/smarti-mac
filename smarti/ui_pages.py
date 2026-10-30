@@ -6392,7 +6392,7 @@ class AboutPage(QWidget):
         hero_layout.addLayout(hero_text)
         content_layout.addWidget(hero)
 
-        # Credit to the original developer, set in a ceremonial (siddur-style) Hebrew face.
+        # Credit to the original developer (regular app typeface).
         credit_card = QFrame()
         credit_card.setObjectName("AboutCreditCard")
         credit_card.setStyleSheet(
@@ -6405,12 +6405,10 @@ class AboutPage(QWidget):
         credit_ornament = QLabel("·  ·  ·")
         credit_ornament.setAlignment(Qt.AlignmentFlag.AlignCenter)
         credit_ornament.setStyleSheet(f"color: {SUBTLE_TEXT_COLOR}; font-size: 18px; letter-spacing: 6px;")
-        credit_family = credit_font_family().replace("'", "")
         credit_title = QLabel("פותח על ידי א.מ.ד")
         credit_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         credit_title.setStyleSheet(
-            f"color: {ACCENT_COLOR}; font-family: '{credit_family}', 'Frank Ruhl Libre', serif; "
-            "font-size: 34px; font-weight: 700;"
+            f"color: {ACCENT_COLOR}; font-family: '{APP_FONT_FAMILY}'; font-size: 28px; font-weight: 700;"
         )
         credit_note = QLabel(
             "גרסת macOS מבוססת על Smarti AI Agent for Windows מאת Elazar (א.מ.ד), "
@@ -6422,11 +6420,6 @@ class AboutPage(QWidget):
         credit_layout.addWidget(credit_ornament)
         credit_layout.addWidget(credit_title)
         credit_layout.addWidget(credit_note)
-        port_credit = QLabel(MAC_PORT_CREDIT)
-        port_credit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        port_credit.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        port_credit.setStyleSheet(f"color: {SUBTLE_TEXT_COLOR}; font-size: 11px; letter-spacing: 1px;")
-        credit_layout.addWidget(port_credit)
         content_layout.addWidget(credit_card)
 
         overview = QLabel(

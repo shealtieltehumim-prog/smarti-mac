@@ -97,6 +97,7 @@ coll = COLLECT(
     name="SmartiAI",
 )
 
+# macOS port: Shaltiel
 app = BUNDLE(
     coll,
     name="Smarti AI Agent.app",
@@ -108,8 +109,7 @@ app = BUNDLE(
         "CFBundleDisplayName": "Smarti AI Agent",
         "CFBundleShortVersionString": "0.87.0",
         "LSMinimumSystemVersion": "13.0",
-        "NSHumanReadableCopyright": "Smarti AI Agent by Elazar (א.מ.ד) - macOS port by Shaltiel",
-        "SmartiMacPortBy": "Shaltiel",
+        "NSHumanReadableCopyright": "Smarti AI Agent by Elazar (א.מ.ד)",
         "NSHighResolutionCapable": True,
         "LSApplicationCategoryType": "public.app-category.productivity",
         "NSMicrophoneUsageDescription": "Smarti uses the microphone for voice input when you enable it.",
